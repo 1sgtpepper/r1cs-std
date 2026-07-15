@@ -1,0 +1,24 @@
+[package]
+name = "mnt6-prepared-binding-reproduction"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+ark-ec = { version = "=0.5.0", default-features = false }
+ark-ff = { version = "=0.5.0", default-features = false }
+ark-groth16 = { git = "https://github.com/arkworks-rs/groth16.git", rev = "b3b4a152b2f379930011ad0699b710d3746a552e", default-features = false }
+ark-mnt4-298 = { version = "=0.5.0", default-features = false, features = ["curve"] }
+ark-mnt6-298 = { version = "=0.5.0", default-features = false }
+ark-r1cs-std = { path = "../.." }
+ark-relations = { git = "https://github.com/arkworks-rs/snark.git", default-features = true }
+ark-std = { version = "=0.5.0", default-features = false, features = ["std"] }
+
+[patch."https://github.com/arkworks-rs/algebra.git"]
+ark-ec = { version = "=0.5.0" }
+ark-ff = { version = "=0.5.0" }
+ark-poly = { version = "=0.5.0" }
+ark-serialize = { version = "=0.5.0" }
+
+[patch."https://github.com/arkworks-rs/crypto-primitives.git"]
+ark-crypto-primitives = { version = "=0.5.0" }
