@@ -1,0 +1,10 @@
+[package]
+name = "boolean-conditional-inequality-reproduction"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+ark-r1cs-std = { path = "../.." }
+ark-relations = { git = "https://github.com/arkworks-rs/snark.git" }
+ark-test-curves = { version = "=0.5.0", default-features = false, features = ["bls12_381_scalar_field"] }
