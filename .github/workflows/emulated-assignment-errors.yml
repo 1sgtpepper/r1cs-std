@@ -1,0 +1,84 @@
+name: Emulated assignment error reproduction
+
+on:
+  push:
+    branches:
+      - repro/emulated-assignment-errors
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: "1"
+      AFFECTED_REVISION: 45e4e2697626a9f9481fe57e70ed29c687194102
+      AFFECTED_TREE: b1d9b897751982714a94f4ca8844bca820f0a97a
+      RELATION_REVISION: 845ce9d50bbe535792f04b44db78b009ee402ed7
+      REPRODUCTION_DIR: reproductions/emulated-assignment-errors
+    steps:
+      - name: Check out reproduction
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 2
+
+      - name: Verify frozen base and isolated contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD~1)" = "$AFFECTED_REVISION"
+          test "$(git show -s --format=%T HEAD~1)" = "$AFFECTED_TREE"
+          test "$(git rev-list --count "$AFFECTED_REVISION"..HEAD)" -eq 1
+          test -z "$(git diff --name-only "$AFFECTED_REVISION"..HEAD -- src)"
+          diff -u \
+            <(printf '%s\n' \
+              .github/workflows/emulated-assignment-errors.yml \
+              reproductions/emulated-assignment-errors/Cargo.lock \
+              reproductions/emulated-assignment-errors/Cargo.toml \
+              reproductions/emulated-assignment-errors/tests/emulated_assignment_errors.rs | sort) \
+            <(git diff --name-only "$AFFECTED_REVISION"..HEAD | sort)
+          grep -Fq "$RELATION_REVISION" "$REPRODUCTION_DIR/Cargo.lock"
+
+      - name: Select Rust 1.85.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.85.1 --profile minimal
+          rustup default 1.85.1
+
+      - name: Run isolated reproduction
+        shell: bash
+        working-directory: ${{ env.REPRODUCTION_DIR }}
+        run: |
+          set -euo pipefail
+          {
+            git -C ../.. show -s --format='commit=%H%ntree=%T%nparent=%P%ncommitted=%cI%nsubject=%s' HEAD
+            git -C ../.. show -s --format='affected_commit=%H%naffected_tree=%T' HEAD~1
+            rustc --version --verbose
+            cargo --version --verbose
+            sha256sum \
+              Cargo.toml \
+              Cargo.lock \
+              tests/emulated_assignment_errors.rs \
+              ../../.github/workflows/emulated-assignment-errors.yml
+            cargo tree --locked
+            cargo test --locked --test emulated_assignment_errors proving_mode_must_propagate_emulated_allocation_errors -- --exact --nocapture
+          } 2>&1 | tee reproduction.log
+
+      - name: Preserve reproduction evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: emulated-assignment-errors-evidence-${{ github.run_id }}
+          path: |
+            .github/workflows/emulated-assignment-errors.yml
+            reproductions/emulated-assignment-errors/Cargo.toml
+            reproductions/emulated-assignment-errors/Cargo.lock
+            reproductions/emulated-assignment-errors/tests/emulated_assignment_errors.rs
+            reproductions/emulated-assignment-errors/reproduction.log
+          if-no-files-found: error
+          retention-days: 30
