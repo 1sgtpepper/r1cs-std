@@ -1087,11 +1087,10 @@ impl<F: PrimeField> EqGadget<F> for FpVar<F> {
     ) -> Result<(), SynthesisError> {
         match (self, other) {
             (Self::Constant(c1), Self::Constant(c2)) => {
-                if c1 == c2 {
-                    Ok(())
-                } else {
-                    should_enforce.enforce_equal(&Boolean::FALSE)
+                if c1 != c2 {
+                    should_enforce.enforce_equal(&Boolean::FALSE)?;
                 }
+                Ok(())
             },
             (Self::Constant(c), Self::Var(v)) | (Self::Var(v), Self::Constant(c)) => {
                 let cs = v.cs.clone();
