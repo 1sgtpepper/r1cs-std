@@ -1086,7 +1086,13 @@ impl<F: PrimeField> EqGadget<F> for FpVar<F> {
         should_enforce: &Boolean<F>,
     ) -> Result<(), SynthesisError> {
         match (self, other) {
-            (Self::Constant(_), Self::Constant(_)) => Ok(()),
+            (Self::Constant(c1), Self::Constant(c2)) => {
+                if c1 == c2 {
+                    Ok(())
+                } else {
+                    should_enforce.enforce_equal(&Boolean::FALSE)
+                }
+            },
             (Self::Constant(c), Self::Var(v)) | (Self::Var(v), Self::Constant(c)) => {
                 let cs = v.cs.clone();
                 let c = AllocatedFp::new_constant(cs, c)?;
@@ -1318,12 +1324,13 @@ impl<'a, F: PrimeField> Sum<FpVar<F>> for FpVar<F> {
 mod test {
     use crate::{
         alloc::AllocVar,
+        boolean::Boolean,
         eq::EqGadget,
         fields::{fp::FpVar, FieldVar},
         test_utils::{combination, modes},
         GR1CSVar,
     };
-    use ark_relations::gr1cs::ConstraintSystem;
+    use ark_relations::gr1cs::{ConstraintSystem, SynthesisError};
     use ark_std::{UniformRand, Zero};
     use ark_test_curves::bls12_381::Fr;
 
@@ -1378,6 +1385,43 @@ mod test {
 
             assert!(cs.is_satisfied().unwrap());
             assert_eq!(sum.value().unwrap(), sum_expected);
+        }
+    }
+
+    #[test]
+    fn conditional_equality_matches_implication_for_all_modes() {
+        for left_mode in modes() {
+            for right_mode in modes() {
+                for guard_mode in modes() {
+                    for values_equal in [false, true] {
+                        for guard_value in [false, true] {
+                            let cs = ConstraintSystem::new_ref();
+                            let left_value = Fr::zero();
+                            let right_value = if values_equal {
+                                left_value
+                            } else {
+                                Fr::from(1u64)
+                            };
+                            let left =
+                                FpVar::new_variable(cs.clone(), || Ok(left_value), left_mode)
+                                    .unwrap();
+                            let right =
+                                FpVar::new_variable(cs.clone(), || Ok(right_value), right_mode)
+                                    .unwrap();
+                            let guard =
+                                Boolean::new_variable(cs.clone(), || Ok(guard_value), guard_mode)
+                                    .unwrap();
+
+                            let accepted = match left.conditional_enforce_equal(&right, &guard) {
+                                Ok(()) => cs.is_satisfied().unwrap(),
+                                Err(SynthesisError::Unsatisfiable) => false,
+                                Err(error) => panic!("unexpected synthesis error: {error:?}"),
+                            };
+                            assert_eq!(accepted, !guard_value || values_equal);
+                        }
+                    }
+                }
+            }
         }
     }
 }
