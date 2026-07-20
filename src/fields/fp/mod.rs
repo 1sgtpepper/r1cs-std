@@ -1423,4 +1423,26 @@ mod test {
             }
         }
     }
+
+    #[test]
+    fn conditional_equality_with_constant_operands_has_assignment_independent_shape() {
+        let synthesize = |guard_value| {
+            let cs = ConstraintSystem::new_ref();
+            let guard = Boolean::new_input(cs.clone(), || Ok(guard_value)).unwrap();
+            FpVar::Constant(Fr::zero())
+                .conditional_enforce_equal(&FpVar::Constant(Fr::from(1u64)), &guard)
+                .unwrap();
+            cs
+        };
+
+        let disabled_cs = synthesize(false);
+        let enabled_cs = synthesize(true);
+
+        assert!(disabled_cs.is_satisfied().unwrap());
+        assert!(!enabled_cs.is_satisfied().unwrap());
+        assert_eq!(
+            disabled_cs.to_matrices().unwrap(),
+            enabled_cs.to_matrices().unwrap()
+        );
+    }
 }

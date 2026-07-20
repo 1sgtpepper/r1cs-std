@@ -10,7 +10,7 @@
 
 ### Bugfixes
 
-- [\#214](https://github.com/arkworks-rs/r1cs-std/pull/214) Enforce `FpVar` conditional equality for unequal constants
+- [\#214](https://github.com/arkworks-rs/r1cs-std/pull/214) Fix `FpVar::{enforce_equal, conditional_enforce_equal}` accepting unequal constants while enforcement is active
 - [\#156](https://github.com/arkworks-rs/r1cs-std/pull/156) Fix panic in `impl Sum for FpVar`
 - [\#198](https://github.com/arkworks-rs/r1cs-std/pull/198) Remove duplicate native cases in run_binary_exhaustive_both
 
