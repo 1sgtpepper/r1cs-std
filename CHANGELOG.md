@@ -10,6 +10,7 @@
 
 ### Bugfixes
 
+- [\#215](https://github.com/arkworks-rs/r1cs-std/pull/215) Make `ProjectiveVar` equality distinguish zero from finite points
 - [\#156](https://github.com/arkworks-rs/r1cs-std/pull/156) Fix panic in `impl Sum for FpVar`
 - [\#198](https://github.com/arkworks-rs/r1cs-std/pull/198) Remove duplicate native cases in run_binary_exhaustive_both
 

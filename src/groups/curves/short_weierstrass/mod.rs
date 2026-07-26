@@ -767,8 +767,12 @@ where
         let x_equal = (&self.x * &other.z).is_eq(&(&other.x * &self.z))?;
         let y_equal = (&self.y * &other.z).is_eq(&(&other.y * &self.z))?;
         let coordinates_equal = x_equal & y_equal;
-        let both_are_zero = self.is_zero()? & other.is_zero()?;
-        Ok(both_are_zero | coordinates_equal)
+        let self_is_zero = self.is_zero()?;
+        let other_is_zero = other.is_zero()?;
+        // `value()` maps every `z == 0` representation to identity, so
+        // homogeneous coordinates are comparable only with the same zero status.
+        let same_zero_status = self_is_zero.is_eq(&other_is_zero)?;
+        Ok(same_zero_status & coordinates_equal)
     }
 
     #[inline]
@@ -778,11 +782,11 @@ where
         other: &Self,
         condition: &Boolean<BasePrimeField<P>>,
     ) -> Result<(), SynthesisError> {
-        let x_equal = (&self.x * &other.z).is_eq(&(&other.x * &self.z))?;
-        let y_equal = (&self.y * &other.z).is_eq(&(&other.y * &self.z))?;
-        let coordinates_equal = x_equal & y_equal;
-        let both_are_zero = self.is_zero()? & other.is_zero()?;
-        (both_are_zero | coordinates_equal).conditional_enforce_equal(&Boolean::TRUE, condition)
+        match self.is_eq(other)? {
+            Boolean::Constant(true) => Ok(()),
+            Boolean::Constant(false) => condition.enforce_equal(&Boolean::FALSE),
+            is_equal => is_equal.conditional_enforce_equal(&Boolean::TRUE, condition),
+        }
     }
 
     #[inline]
@@ -986,19 +990,22 @@ where
 mod test_sw_curve {
     use crate::{
         alloc::AllocVar,
+        boolean::Boolean,
         convert::ToBitsGadget,
         eq::EqGadget,
         fields::{emulated_fp::EmulatedFpVar, fp::FpVar},
         groups::{curves::short_weierstrass::ProjectiveVar, CurveVar},
+        test_utils::modes,
+        GR1CSVar,
     };
     use ark_ec::{
         short_weierstrass::{Projective, SWCurveConfig},
-        CurveGroup,
+        CurveGroup, PrimeGroup,
     };
     use ark_ff::PrimeField;
     use ark_relations::gr1cs::{ConstraintSystem, Result};
     use ark_std::UniformRand;
-    use num_traits::Zero;
+    use num_traits::{One, Zero};
 
     fn zero_point_scalar_mul_satisfied<G>() -> Result<bool>
     where
@@ -1037,5 +1044,177 @@ mod test_sw_curve {
         assert!(zero_point_scalar_mul_satisfied::<ark_mnt4_298::G1Projective>().unwrap());
         assert!(zero_point_scalar_mul_satisfied::<ark_mnt6_298::G1Projective>().unwrap());
         assert!(zero_point_scalar_mul_satisfied::<ark_bn254::G1Projective>().unwrap());
+    }
+
+    #[test]
+    fn projective_equality_matches_decoded_values() -> Result<()> {
+        use ark_mnt6_298::{g1::Config, Fq, G1Projective};
+
+        type G1Var = ProjectiveVar<Config, FpVar<Fq>>;
+        type Coordinates = (Fq, Fq, Fq);
+
+        let generator = G1Projective::generator().into_affine();
+        let scale = Fq::one() + Fq::one();
+        let all_zero = (Fq::zero(), Fq::zero(), Fq::zero());
+        let canonical_zero = (Fq::zero(), Fq::one(), Fq::zero());
+        let canonical_generator = (generator.x, generator.y, Fq::one());
+        let scaled_generator = (generator.x * scale, generator.y * scale, scale);
+        let other_generator = (G1Projective::generator() + G1Projective::generator()).into_affine();
+        let canonical_other_generator = (other_generator.x, other_generator.y, Fq::one());
+
+        for (left_coordinates, right_coordinates) in [
+            (all_zero, canonical_generator),
+            (canonical_generator, all_zero),
+            (all_zero, canonical_zero),
+            (canonical_generator, scaled_generator),
+            (canonical_generator, canonical_other_generator),
+        ] {
+            for left_mode in modes() {
+                for right_mode in modes() {
+                    let cs = ConstraintSystem::<Fq>::new_ref();
+                    let left = G1Var::new(
+                        FpVar::new_variable(cs.clone(), || Ok(left_coordinates.0), left_mode)?,
+                        FpVar::new_variable(cs.clone(), || Ok(left_coordinates.1), left_mode)?,
+                        FpVar::new_variable(cs.clone(), || Ok(left_coordinates.2), left_mode)?,
+                    );
+                    let right = G1Var::new(
+                        FpVar::new_variable(cs.clone(), || Ok(right_coordinates.0), right_mode)?,
+                        FpVar::new_variable(cs.clone(), || Ok(right_coordinates.1), right_mode)?,
+                        FpVar::new_variable(cs.clone(), || Ok(right_coordinates.2), right_mode)?,
+                    );
+                    let expected = left.value()? == right.value()?;
+                    let actual = left.is_eq(&right)?;
+
+                    assert_eq!(actual.value()?, expected);
+                    actual.enforce_equal(&Boolean::constant(expected))?;
+                    assert!(cs.is_satisfied()?);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn conditional_projective_equality_respects_guard() -> Result<()> {
+        use ark_mnt6_298::{g1::Config, Fq, G1Projective};
+
+        type G1Var = ProjectiveVar<Config, FpVar<Fq>>;
+
+        let generator = G1Projective::generator().into_affine();
+        for left_mode in modes() {
+            for right_mode in modes() {
+                for guard_value in [false, true] {
+                    let cs = ConstraintSystem::<Fq>::new_ref();
+                    let all_zero = G1Var::new(
+                        FpVar::new_variable(cs.clone(), || Ok(Fq::zero()), left_mode)?,
+                        FpVar::new_variable(cs.clone(), || Ok(Fq::zero()), left_mode)?,
+                        FpVar::new_variable(cs.clone(), || Ok(Fq::zero()), left_mode)?,
+                    );
+                    let generator = G1Var::new(
+                        FpVar::new_variable(cs.clone(), || Ok(generator.x), right_mode)?,
+                        FpVar::new_variable(cs.clone(), || Ok(generator.y), right_mode)?,
+                        FpVar::new_variable(cs.clone(), || Ok(Fq::one()), right_mode)?,
+                    );
+                    let guard = Boolean::new_witness(cs.clone(), || Ok(guard_value))?;
+
+                    assert_ne!(all_zero.value()?, generator.value()?);
+                    all_zero.conditional_enforce_equal(&generator, &guard)?;
+                    assert_eq!(cs.is_satisfied()?, !guard_value);
+                }
+            }
+        }
+
+        let cs = ConstraintSystem::<Fq>::new_ref();
+        let generator = G1Var::new_witness(cs.clone(), || Ok(G1Projective::generator()))?;
+        let guard = Boolean::new_witness(cs.clone(), || Ok(true))?;
+        generator.conditional_enforce_equal(&generator, &guard)?;
+        assert!(cs.is_satisfied()?);
+        Ok(())
+    }
+
+    #[test]
+    fn conditional_projective_inequality_accepts_zero_and_finite() -> Result<()> {
+        use ark_mnt6_298::{g1::Config, Fq, G1Projective};
+
+        type G1Var = ProjectiveVar<Config, FpVar<Fq>>;
+
+        let generator = G1Projective::generator().into_affine();
+        let cs = ConstraintSystem::<Fq>::new_ref();
+        let all_zero = G1Var::new(
+            FpVar::new_input(cs.clone(), || Ok(Fq::zero()))?,
+            FpVar::new_input(cs.clone(), || Ok(Fq::zero()))?,
+            FpVar::new_input(cs.clone(), || Ok(Fq::zero()))?,
+        );
+        let generator = G1Var::new(
+            FpVar::new_witness(cs.clone(), || Ok(generator.x))?,
+            FpVar::new_witness(cs.clone(), || Ok(generator.y))?,
+            FpVar::new_witness(cs.clone(), || Ok(Fq::one()))?,
+        );
+        let guard = Boolean::new_witness(cs.clone(), || Ok(true))?;
+
+        all_zero.conditional_enforce_not_equal(&generator, &guard)?;
+        assert!(cs.is_satisfied()?);
+        Ok(())
+    }
+
+    #[test]
+    fn conditional_projective_equality_uses_direct_implication_cost() -> Result<()> {
+        use ark_mnt6_298::{g1::Config, Fq, G1Projective};
+
+        type G1Var = ProjectiveVar<Config, FpVar<Fq>>;
+
+        let generator = G1Projective::generator().into_affine();
+
+        let direct_cs = ConstraintSystem::<Fq>::new_ref();
+        let direct_all_zero = G1Var::new(
+            FpVar::new_witness(direct_cs.clone(), || Ok(Fq::zero()))?,
+            FpVar::new_witness(direct_cs.clone(), || Ok(Fq::zero()))?,
+            FpVar::new_witness(direct_cs.clone(), || Ok(Fq::zero()))?,
+        );
+        let direct_generator = G1Var::new(
+            FpVar::new_witness(direct_cs.clone(), || Ok(generator.x))?,
+            FpVar::new_witness(direct_cs.clone(), || Ok(generator.y))?,
+            FpVar::new_witness(direct_cs.clone(), || Ok(Fq::one()))?,
+        );
+        let direct_guard = Boolean::new_witness(direct_cs.clone(), || Ok(false))?;
+        let direct_before = (
+            direct_cs.num_constraints(),
+            direct_cs.num_witness_variables(),
+        );
+        direct_all_zero
+            .is_eq(&direct_generator)?
+            .conditional_enforce_equal(&Boolean::TRUE, &direct_guard)?;
+        let direct_cost = (
+            direct_cs.num_constraints() - direct_before.0,
+            direct_cs.num_witness_variables() - direct_before.1,
+        );
+
+        let conditional_cs = ConstraintSystem::<Fq>::new_ref();
+        let conditional_all_zero = G1Var::new(
+            FpVar::new_witness(conditional_cs.clone(), || Ok(Fq::zero()))?,
+            FpVar::new_witness(conditional_cs.clone(), || Ok(Fq::zero()))?,
+            FpVar::new_witness(conditional_cs.clone(), || Ok(Fq::zero()))?,
+        );
+        let conditional_generator = G1Var::new(
+            FpVar::new_witness(conditional_cs.clone(), || Ok(generator.x))?,
+            FpVar::new_witness(conditional_cs.clone(), || Ok(generator.y))?,
+            FpVar::new_witness(conditional_cs.clone(), || Ok(Fq::one()))?,
+        );
+        let conditional_guard = Boolean::new_witness(conditional_cs.clone(), || Ok(false))?;
+        let conditional_before = (
+            conditional_cs.num_constraints(),
+            conditional_cs.num_witness_variables(),
+        );
+        conditional_all_zero
+            .conditional_enforce_equal(&conditional_generator, &conditional_guard)?;
+        let conditional_cost = (
+            conditional_cs.num_constraints() - conditional_before.0,
+            conditional_cs.num_witness_variables() - conditional_before.1,
+        );
+
+        assert_eq!(conditional_cost, direct_cost);
+        assert!(direct_cs.is_satisfied()?);
+        assert!(conditional_cs.is_satisfied()?);
+        Ok(())
     }
 }
