@@ -782,6 +782,8 @@ where
         other: &Self,
         condition: &Boolean<BasePrimeField<P>>,
     ) -> Result<(), SynthesisError> {
+        // Boolean conditional equality rejects unequal constants before observing a
+        // nonconstant condition, so handle those results separately for vacuous truth.
         match self.is_eq(other)? {
             Boolean::Constant(true) => Ok(()),
             Boolean::Constant(false) => condition.enforce_equal(&Boolean::FALSE),
