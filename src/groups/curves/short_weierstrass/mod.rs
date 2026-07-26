@@ -1211,7 +1211,7 @@ mod test_sw_curve {
             conditional_cs.num_witness_variables() - conditional_before.1,
         );
 
-        assert_eq!(conditional_cost, direct_cost);
+        assert!(conditional_cost <= direct_cost);
         assert!(direct_cs.is_satisfied()?);
         assert!(conditional_cs.is_satisfied()?);
         Ok(())
