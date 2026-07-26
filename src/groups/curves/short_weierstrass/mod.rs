@@ -1051,7 +1051,6 @@ mod test_sw_curve {
         use ark_mnt6_298::{g1::Config, Fq, G1Projective};
 
         type G1Var = ProjectiveVar<Config, FpVar<Fq>>;
-        type Coordinates = (Fq, Fq, Fq);
 
         let generator = G1Projective::generator().into_affine();
         let scale = Fq::one() + Fq::one();
